@@ -1,10 +1,21 @@
 import operator
 
+import  contextvars
 FALLBACK_RTRUEDIV_TYPES = (type(dict().keys()), type(dict().values()), type(dict().items()))
 
 
 def _resolve(pipe, x):
     while isinstance(pipe, Pipe):
+        if pipe._name != 'def':
+            x=None 
+            ctx= contextvars.copy_context() 
+            for k,v in ctx.items():
+                if k.name == pipe._name:
+                    if v is not None:
+                        x = v
+                    else:
+                        raise ValueError('Double value {} '.format(pipe._name))
+
         pipe = pipe._____func___(x)
     return pipe
 
@@ -14,10 +25,11 @@ class Pipe(object):
     >>> [lambda : '{}'] | (Pipe(lambda x: x)[0]().format(2) | Pipe(int)**3)
     8
     """
-    __slots__ = ('_____func___',)
+    __slots__ = ('_____func___', '_name')
 
-    def __init__(self, func):
+    def __init__(self, func,name='def'):
         self._____func___ = func
+        self._name = name
 
     def __ror__(self, other):
         ret = _resolve(self, other)
@@ -25,26 +37,26 @@ class Pipe(object):
 
     def __or__(self, other):
         if isinstance(other, Pipe):
-            return Pipe(lambda x: _resolve(other, _resolve(self, x)))
+            return Pipe(lambda x: _resolve(other, _resolve(self, x)),name=self._name)
 
-        return Pipe(lambda x: _resolve(self, x) | other)
+        return Pipe(lambda x: _resolve(self, x) | other,name=self._name)
 
     def __rtruediv__(self, other):
         if isinstance(other, FALLBACK_RTRUEDIV_TYPES):
             return _resolve(self, other)
 
-        return Pipe(lambda x: _resolve(other, x) / _resolve(self, x))
+        return Pipe(lambda x: _resolve(other, x) / _resolve(self, x),name=self._name)
 
     def __getattr__(self, item):
-        return Pipe.partial(getattr, self, item)
+        return Pipe.partial(getattr, self, item,name=self._name)
 
     def __call__(self, *args, **kwargs):
-        return Pipe.partial(self, *args, **kwargs)
+        return Pipe.partial(self, *args, **kwargs,name=self._name)
 
     def __getitem__(self, item):
         if isinstance(item, tuple) and len(item) < 20:  # do not iterate over too large tuples!
             item = Pipe.collection(item)
-        return Pipe.partial(operator.getitem, self, item)
+        return Pipe.partial(operator.getitem, self, item,name=self._name)
 
     __array_priority__ = -10
 
@@ -76,8 +88,11 @@ class Pipe(object):
 
     @staticmethod
     def partial(func, *args, **kwargs):
+        name = kwargs.pop('name','def')
+
         # Code duplication in this function is intentional to increase performance.
         if isinstance(func, Pipe):
+            name = func._name
             if kwargs:
                 def _resolve_function_call(x):
                     resolved_func = _resolve(func, x)
@@ -90,7 +105,7 @@ class Pipe(object):
                     resolved_args = (_resolve(arg, x) for arg in args)
                     return resolved_func(*resolved_args)
 
-            return Pipe(_resolve_function_call)
+            return Pipe(_resolve_function_call,name=name)
         else:
             if kwargs:
                 def _resolve_function_call(x):
@@ -102,7 +117,7 @@ class Pipe(object):
                     resolved_args = (_resolve(arg, x) for arg in args)
                     return func(*resolved_args)
 
-            return Pipe(_resolve_function_call)
+            return Pipe(_resolve_function_call,name=name)
 
     @staticmethod
     def collection(items):
@@ -115,7 +130,7 @@ class Pipe(object):
                 resolved_items = (_resolve(item, x) for item in items)
                 return type(items)(resolved_items)
 
-        return Pipe(_resolve_collection_creation)
+        return Pipe(_resolve_collection_creation,name='def')
 
 
 def _override_operator(op, impl):
