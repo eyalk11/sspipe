@@ -3,18 +3,28 @@ import operator
 import  contextvars
 FALLBACK_RTRUEDIV_TYPES = (type(dict().keys()), type(dict().values()), type(dict().items()))
 
-
 def _resolve(pipe, x):
     while isinstance(pipe, Pipe):
         if pipe._name != 'def':
             x=None 
-            ctx= contextvars.copy_context() 
+            ctx= contextvars.copy_context()
+            vars=set()
+
             for k,v in ctx.items():
                 if k.name == pipe._name:
                     if v is not None:
                         x = v
+                        vars.add(k.name)
                     else:
                         raise ValueError('Double value {} '.format(pipe._name))
+            try:
+                tlocal=[k for k in ctx.keys() if k.name=='TLocal'][0]
+                loc=tlocal.get()
+
+                usedvars= loc.usedvars
+                usedvars.update(vars)
+            except:
+                pass
 
         pipe = pipe._____func___(x)
     return pipe
